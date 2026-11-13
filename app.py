@@ -21,8 +21,8 @@ logger = logging.getLogger("campus_ai")
 def create_app():
     app = Flask(
         __name__,
-        static_folder="static",
-        template_folder="templates"
+        static_folder=str(Config.BASE_DIR / "static"),
+        template_folder=str(Config.BASE_DIR / "templates")
     )
     app.config.from_object(Config)
 
