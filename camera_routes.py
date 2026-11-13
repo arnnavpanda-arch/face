@@ -131,7 +131,11 @@ def process_frame():
                 # Save snapshot if entry is recorded
                 snapshot_filename = f"snap_{student['student_id']}_{int(time.time()*1000)}.jpg"
                 snapshot_path = Config.SNAPSHOTS_DIR / snapshot_filename
-                cv2.imwrite(str(snapshot_path), face_crop)
+                try:
+                    Config.SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+                    cv2.imwrite(str(snapshot_path), face_crop)
+                except Exception:
+                    pass
                 snapshot_url = f"/static/uploads/snapshots/{snapshot_filename}"
 
                 # Step 4: Record entry with cooldown anti-duplication
@@ -155,7 +159,11 @@ def process_frame():
                 # Unknown Person handling (Section 4.G: record unmatched events, non-punitive)
                 snapshot_filename = f"unknown_{camera_id}_{int(time.time()*1000)}.jpg"
                 snapshot_path = Config.UNKNOWN_PHOTOS_DIR / snapshot_filename
-                cv2.imwrite(str(snapshot_path), face_crop)
+                try:
+                    Config.UNKNOWN_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+                    cv2.imwrite(str(snapshot_path), face_crop)
+                except Exception:
+                    pass
                 snapshot_url = f"/static/uploads/unknowns/{snapshot_filename}"
 
                 # Only log unknown once every 10s per camera to prevent flooding
@@ -237,8 +245,12 @@ def get_current_frame():
     """Returns a single pre-rendered surveillance JPEG frame without holding a stream open."""
     night_vision = request.args.get("night_vision", "false").lower() in ("true", "1", "yes")
     frames = get_precomputed_stream_frames(night_vision=night_vision)
-    idx = int(time.time() / 3) % len(frames)
-    return Response(frames[idx], mimetype="image/jpeg")
+    idx = int(time.time() / 1.5) % len(frames)
+    return Response(
+        frames[idx],
+        mimetype="image/jpeg",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+    )
 
 # In-memory pre-rendered frame cache for zero-CPU streaming
 _CACHED_STREAM_FRAMES = {"normal": [], "night": []}

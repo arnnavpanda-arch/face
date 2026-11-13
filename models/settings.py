@@ -10,14 +10,21 @@ from config import Config
 
 class SettingsModel:
     CONFIG_KEY = "institutional_config"
+    _CACHE = None
+    _CACHE_TIME = 0.0
+    _CACHE_TTL = 30.0  # seconds
 
     @staticmethod
     def get_settings() -> dict:
+        now = time.time()
+        if SettingsModel._CACHE is not None and (now - SettingsModel._CACHE_TIME < SettingsModel._CACHE_TTL):
+            return SettingsModel._CACHE
+
         col = get_settings_collection()
         doc = col.find_one({"key": SettingsModel.CONFIG_KEY})
         if not doc:
             # Fallback default
-            return {
+            doc = {
                 "institution_name": Config.DEFAULT_INSTITUTION_NAME,
                 "campus_location": Config.DEFAULT_CAMPUS_LOCATION,
                 "similarity_threshold": Config.SIMILARITY_THRESHOLD,
@@ -36,11 +43,16 @@ class SettingsModel:
                     "unknown_logs_days": Config.RETENTION_DAYS_UNKNOWN_LOGS
                 }
             }
-        doc["_id"] = str(doc["_id"])
+        else:
+            doc["_id"] = str(doc["_id"])
+
+        SettingsModel._CACHE = doc
+        SettingsModel._CACHE_TIME = now
         return doc
 
     @staticmethod
     def update_settings(updates: dict) -> bool:
+        SettingsModel._CACHE = None  # Invalidate cache immediately on update
         col = get_settings_collection()
         updates["updated_at"] = time.time()
         res = col.update_one(

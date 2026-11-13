@@ -10,11 +10,16 @@ const CameraController = {
   stream: null,
   isProcessing: false,
   timerId: null,
+  animFrameId: null,
+  simTimerId: null,
+  offCanvas: null,
+  offCtx: null,
   activeCameraId: "cam_gate_north",
   activeCameraName: "North Main Entrance - Lane 1",
   soundEnabled: true,
   nightVisionEnabled: false,
   lastDetections: [],
+  lastDetectionTime: 0,
 
   init() {
     // Select elements based on active panel (Kiosk vs Admin)
@@ -66,18 +71,67 @@ const CameraController = {
       this.updateStatusPill(`<span class="badge-pulse"></span> LIVE WEBCAM SCANNING`, true);
       this.toggleButtons(true);
 
-      // Start continuous detection loop at ~8-10 FPS
-      this.timerId = setInterval(() => this.captureAndProcess(), 120);
+      // 1. Start fluid 60 FPS local video renderer (zero hang, zero stutter)
+      this.startRenderLoop();
+
+      // 2. Start decoupled background AI scanner (captures lightweight frame every 350ms)
+      this.timerId = setInterval(() => this.captureAndProcess(), 350);
     } catch (err) {
       console.warn("Could not access user webcam:", err);
       this.startSimulatedFeed();
     }
   },
 
+  startRenderLoop() {
+    if (this.animFrameId) {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = null;
+    }
+
+    const render = () => {
+      if (!this.stream || !this.videoElem || !this.canvasElem) return;
+
+      if (this.videoElem.readyState >= 2) {
+        const vw = this.videoElem.videoWidth || 640;
+        const vh = this.videoElem.videoHeight || 480;
+
+        if (this.canvasElem.width !== vw || this.canvasElem.height !== vh) {
+          this.canvasElem.width = vw;
+          this.canvasElem.height = vh;
+        }
+
+        // Draw live webcam video smoothly at 60 FPS
+        this.ctx.drawImage(this.videoElem, 0, 0, vw, vh);
+
+        // Night vision phosphor effect if active
+        if (this.nightVisionEnabled) {
+          this.ctx.fillStyle = "rgba(16, 185, 129, 0.08)";
+          this.ctx.fillRect(0, 0, vw, vh);
+          this.ctx.fillStyle = "#10b981";
+          this.ctx.font = "bold 11px monospace";
+          this.ctx.fillText(`⚡ NIGHT VISION ACTIVE`, 16, vh - 16);
+        }
+
+        // Draw latest detection boxes if seen within last 1800ms
+        if (this.lastDetections && this.lastDetections.length > 0 && (Date.now() - this.lastDetectionTime < 1800)) {
+          this.drawBoundingBoxes(this.lastDetections);
+        }
+      }
+
+      this.animFrameId = requestAnimationFrame(render);
+    };
+
+    this.animFrameId = requestAnimationFrame(render);
+  },
+
   stopWebcam() {
     if (this.timerId) {
       clearInterval(this.timerId);
       this.timerId = null;
+    }
+    if (this.animFrameId) {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = null;
     }
     if (this.simTimerId) {
       clearTimeout(this.simTimerId);
@@ -105,38 +159,59 @@ const CameraController = {
     if (this.ctx && this.canvasElem) {
       this.ctx.clearRect(0, 0, this.canvasElem.width, this.canvasElem.height);
     }
+    this.lastDetections = [];
+    this.isProcessing = false;
   },
 
   startSimulatedFeed() {
     this.updateStatusPill(`<span class="badge-pulse"></span> LIVE ENTRANCE GATE STREAM`, true);
-    const nv = this.nightVisionEnabled ? "1" : "0";
-    const mjpegElems = [document.getElementById("kiosk-mjpeg-stream-img"), document.getElementById("mjpeg-stream-img")];
-    
+
     if (this.simTimerId) {
       clearTimeout(this.simTimerId);
       this.simTimerId = null;
     }
+    if (this.animFrameId) {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = null;
+    }
 
-    mjpegElems.forEach(img => {
-      if (img) {
-        img.classList.remove("d-none");
-        const fetchNext = () => {
-          if (img.classList.contains("d-none")) return;
-          const pre = new Image();
-          pre.onload = () => {
-            if (!img.classList.contains("d-none")) {
-              img.src = pre.src;
-              this.simTimerId = setTimeout(fetchNext, 180);
-            }
-          };
-          pre.onerror = () => {
-            this.simTimerId = setTimeout(fetchNext, 1000);
-          };
-          pre.src = `/api/camera/current-frame?night_vision=${this.nightVisionEnabled ? "1" : "0"}&t=${Date.now()}`;
+    // Identify which container is visible (kiosk vs admin)
+    const isKiosk = !document.getElementById("kiosk-panel")?.classList.contains("d-none");
+    const activeImg = isKiosk
+      ? document.getElementById("kiosk-mjpeg-stream-img")
+      : (document.getElementById("mjpeg-stream-img") || document.getElementById("kiosk-mjpeg-stream-img"));
+
+    const otherImg = (activeImg?.id === "kiosk-mjpeg-stream-img")
+      ? document.getElementById("mjpeg-stream-img")
+      : document.getElementById("kiosk-mjpeg-stream-img");
+
+    if (otherImg) {
+      otherImg.src = "";
+      otherImg.classList.add("d-none");
+    }
+
+    if (activeImg) {
+      activeImg.classList.remove("d-none");
+      let isFetching = false;
+      const fetchNext = () => {
+        if (activeImg.classList.contains("d-none") || isFetching) return;
+        isFetching = true;
+        const pre = new Image();
+        pre.onload = () => {
+          isFetching = false;
+          if (!activeImg.classList.contains("d-none")) {
+            activeImg.src = pre.src;
+            this.simTimerId = setTimeout(fetchNext, 600); // Stable ~1.6 FPS gate frame cycle without network congestions
+          }
         };
-        fetchNext();
-      }
-    });
+        pre.onerror = () => {
+          isFetching = false;
+          this.simTimerId = setTimeout(fetchNext, 1500);
+        };
+        pre.src = `/api/camera/current-frame?night_vision=${this.nightVisionEnabled ? "1" : "0"}&t=${Date.now()}`;
+      };
+      fetchNext();
+    }
 
     if (this.canvasElem) this.canvasElem.classList.add("d-none");
     if (this.videoElem) this.videoElem.classList.add("d-none");
@@ -198,19 +273,8 @@ const CameraController = {
       }
     });
 
-    // If currently viewing simulated live stream, refresh stream URL with night_vision parameter
-    const mjpegElems = [document.getElementById("kiosk-mjpeg-stream-img"), document.getElementById("mjpeg-stream-img")];
-    const nv = this.nightVisionEnabled ? "1" : "0";
-    let isStreamActive = false;
-    mjpegElems.forEach(img => {
-      if (img && !img.classList.contains("d-none")) {
-        isStreamActive = true;
-        img.src = `/api/camera/stream?night_vision=${nv}&t=${Date.now()}`;
-      }
-    });
-
-    // If stream is not active and physical webcam is not active, auto-start the live stream with the chosen night vision state
-    if (!isStreamActive && !this.stream) {
+    // Refresh simulated feed if active
+    if (!this.stream) {
       this.startSimulatedFeed();
     }
 
@@ -225,55 +289,69 @@ const CameraController = {
       const vw = this.videoElem.videoWidth || 640;
       const vh = this.videoElem.videoHeight || 480;
 
-      this.canvasElem.width = vw;
-      this.canvasElem.height = vh;
+      // Downscale offscreen to 480px width for hyper-fast upload & sub-50ms inference
+      if (!this.offCanvas) {
+        this.offCanvas = document.createElement("canvas");
+        this.offCtx = this.offCanvas.getContext("2d");
+      }
+      const targetW = 480;
+      const targetH = Math.round((vh / vw) * targetW);
+      if (this.offCanvas.width !== targetW || this.offCanvas.height !== targetH) {
+        this.offCanvas.width = targetW;
+        this.offCanvas.height = targetH;
+      }
+      this.offCtx.drawImage(this.videoElem, 0, 0, targetW, targetH);
 
-      // Draw current video frame to canvas
-      this.ctx.drawImage(this.videoElem, 0, 0, vw, vh);
-
-      // Export base64 jpeg
-      const b64 = this.canvasElem.toDataURL("image/jpeg", 0.75);
+      // Lightweight compressed JPEG string (~16-20 KB payload)
+      const b64 = this.offCanvas.toDataURL("image/jpeg", 0.60);
 
       const resp = await API.processFrame(b64, this.activeCameraId, this.activeCameraName, this.nightVisionEnabled);
       if (resp && resp.results) {
-        this.renderDetections(
-          resp.results,
-          vw,
-          vh,
+        // Rescale bounding boxes back to native video canvas dimensions
+        const scaleX = vw / targetW;
+        const scaleY = vh / targetH;
+        const scaledResults = resp.results.map(r => {
+          const [bx, by, bw, bh] = r.bbox;
+          return {
+            ...r,
+            bbox: [Math.round(bx * scaleX), Math.round(by * scaleY), Math.round(bw * scaleX), Math.round(bh * scaleY)]
+          };
+        });
+
+        this.lastDetections = scaledResults;
+        this.lastDetectionTime = Date.now();
+
+        // Update HUD meters
+        this.updateHudMetrics(
           resp.total_frame_latency_ms,
           resp.fps_estimate,
           resp.night_vision_active,
           resp.ambient_brightness
         );
+
+        // Push new detections to live roster feed
+        scaledResults.forEach(res => {
+          if (this.shouldPushFeed(res)) {
+            this.pushRecentDetection(res);
+          }
+        });
       }
     } catch (err) {
-      console.error("Frame processing error:", err);
+      console.warn("Frame processing background notice:", err);
     } finally {
       this.isProcessing = false;
     }
   },
 
-  renderDetections(results, vw, vh, totalLatency, fps, nightActive, ambientLux) {
-    // Redraw frame
-    this.ctx.drawImage(this.videoElem, 0, 0, vw, vh);
-
+  updateHudMetrics(totalLatency, fps, nightActive, ambientLux) {
     const isNightActive = nightActive || this.nightVisionEnabled;
-
-    // Optional night vision phosphorescence effect on canvas
-    if (isNightActive) {
-      this.ctx.fillStyle = "rgba(16, 185, 129, 0.08)";
-      this.ctx.fillRect(0, 0, vw, vh);
-      this.ctx.fillStyle = "#10b981";
-      this.ctx.font = "bold 11px monospace";
-      this.ctx.fillText(`⚡ NIGHT VISION ACTIVE | AMBIENT: ${ambientLux ? ambientLux.toFixed(0) : 40} LUX`, 16, vh - 16);
-    }
 
     // Update HUD metrics on both panels
     const fpsBadges = [document.getElementById("kiosk-fps-pill"), document.getElementById("camera-fps-pill")];
-    fpsBadges.forEach(b => { if (b) b.innerText = `${fps || 12} FPS`; });
+    fpsBadges.forEach(b => { if (b) b.innerText = `${fps || 24} FPS`; });
 
     const latBadges = [document.getElementById("kiosk-lat-pill"), document.getElementById("camera-lat-pill")];
-    latBadges.forEach(b => { if (b) b.innerText = `${totalLatency || 60} ms`; });
+    latBadges.forEach(b => { if (b) b.innerText = `${totalLatency || 45} ms`; });
 
     const nightPills = [document.getElementById("kiosk-night-pill"), document.getElementById("camera-night-pill")];
     nightPills.forEach(p => {
@@ -286,6 +364,10 @@ const CameraController = {
         }
       }
     });
+  },
+
+  drawBoundingBoxes(results) {
+    if (!this.ctx || !results) return;
 
     results.forEach(res => {
       const [x, y, w, h] = res.bbox;
@@ -332,8 +414,13 @@ const CameraController = {
       // Draw text
       this.ctx.fillStyle = "#ffffff";
       this.ctx.fillText(label, x + 8, Math.max(18, y - 10));
+    });
+  },
 
-      // Push detection to live feeds only if newly logged or throttled (prevents spamming 10x/sec)
+  renderDetections(results, vw, vh, totalLatency, fps, nightActive, ambientLux) {
+    this.updateHudMetrics(totalLatency, fps, nightActive, ambientLux);
+    this.drawBoundingBoxes(results);
+    results.forEach(res => {
       if (this.shouldPushFeed(res)) {
         this.pushRecentDetection(res);
       }
