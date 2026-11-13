@@ -5,7 +5,10 @@ Handles student registration, metadata updates, search, CSV/Excel import/export,
 
 import io
 import csv
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 from flask import Blueprint, request, jsonify, Response, g
 from models.student import StudentModel
 from auth import login_required, admin_required, log_audit_event
@@ -123,26 +126,42 @@ def import_students():
     filename = file.filename.lower()
 
     try:
-        if filename.endswith(".csv"):
-            df = pd.read_csv(file)
-        elif filename.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(file)
+        records = []
+        if pd is not None:
+            if filename.endswith(".csv"):
+                df = pd.read_csv(file)
+            elif filename.endswith((".xlsx", ".xls")):
+                df = pd.read_excel(file)
+            else:
+                return jsonify({"status": "error", "message": "Unsupported file format. Please upload CSV or Excel (.xlsx)."}), 400
+
+            cols = [c.strip().lower() for c in df.columns]
+            df.columns = cols
+
+            if "reg_no" not in df.columns or "name" not in df.columns:
+                return jsonify({"status": "error", "message": "File must contain 'reg_no' and 'name' columns."}), 400
+
+            for _, row in df.iterrows():
+                records.append({k: (str(v) if pd.notna(v) else "") for k, v in row.items()})
         else:
-            return jsonify({"status": "error", "message": "Unsupported file format. Please upload CSV or Excel (.xlsx)."}), 400
-
-        # Required columns: reg_no, name
-        cols = [c.strip().lower() for c in df.columns]
-        df.columns = cols
-
-        if "reg_no" not in df.columns or "name" not in df.columns:
-            return jsonify({"status": "error", "message": "File must contain 'reg_no' and 'name' columns."}), 400
+            if filename.endswith(".csv"):
+                content = file.stream.read().decode("utf-8", errors="replace")
+                stream = io.StringIO(content, newline=None)
+                reader = csv.DictReader(stream)
+                for row in reader:
+                    norm_row = {k.strip().lower(): (v.strip() if v else "") for k, v in row.items() if k}
+                    records.append(norm_row)
+                if not records or "reg_no" not in records[0] or "name" not in records[0]:
+                    return jsonify({"status": "error", "message": "File must contain 'reg_no' and 'name' columns."}), 400
+            else:
+                return jsonify({"status": "error", "message": "Excel (.xlsx) requires pandas. Please upload a standard CSV file."}), 400
 
         imported = 0
         skipped = 0
 
-        for _, row in df.iterrows():
-            reg_no = str(row["reg_no"]).strip().upper()
-            name = str(row["name"]).strip()
+        for row in records:
+            reg_no = str(row.get("reg_no", "")).strip().upper()
+            name = str(row.get("name", "")).strip()
             if not reg_no or not name or reg_no == "NAN" or name == "NAN":
                 continue
 
@@ -151,10 +170,14 @@ def import_students():
                 skipped += 1
                 continue
 
-            dept = str(row.get("department", "General Engineering")).strip()
-            year = str(row.get("academic_year", "1st Year")).strip()
-            email = str(row.get("email", "")).strip().lower() if "email" in df.columns and str(row.get("email")) != "nan" else f"{reg_no.lower()}@institution.edu"
-            phone = str(row.get("phone", "")).strip() if "phone" in df.columns and str(row.get("phone")) != "nan" else ""
+            dept = str(row.get("department") or "General Engineering").strip()
+            year = str(row.get("academic_year") or "1st Year").strip()
+            email = str(row.get("email") or "").strip().lower()
+            if not email or email == "nan":
+                email = f"{reg_no.lower().replace('/', '_')}@institution.edu"
+            phone = str(row.get("phone") or "").strip()
+            if phone == "nan":
+                phone = ""
 
             StudentModel.create({
                 "reg_no": reg_no,
