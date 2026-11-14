@@ -9,20 +9,13 @@ const App = {
   theme: "dark",
   charts: {},
 
-  async init() {
-    // 1. Initialize Theme from localStorage
+  init() {
+    // 1. Initialize Theme from localStorage immediately
     const savedTheme = localStorage.getItem("campus_theme") || "dark";
     this.setTheme(savedTheme);
 
-    // 2. Fetch public institution name and campus branding immediately
-    try {
-      const pub = await API.getPublicInfo();
-      if (pub && pub.institution_name) {
-        this.updateInstitutionBranding(pub.institution_name, pub.campus_location);
-      }
-    } catch (e) {
-      console.warn("Public info fetch error:", e);
-    }
+    // 2. Default view: Gate Entrance Camera Scanning Tool (Panel 1) - Render immediately with 0ms delay
+    this.showKioskPanel();
 
     // 3. Start Live Clock on Kiosk
     this.startKioskClock();
@@ -31,8 +24,12 @@ const App = {
     this.loadKioskRecentEntries();
     setInterval(() => this.loadKioskRecentEntries(), 3500);
 
-    // 5. Default view: Gate Entrance Camera Scanning Tool (Panel 1)
-    this.showKioskPanel();
+    // 5. Fetch public institution name and campus branding asynchronously in background (non-blocking)
+    API.getPublicInfo().then(pub => {
+      if (pub && pub.institution_name) {
+        this.updateInstitutionBranding(pub.institution_name, pub.campus_location);
+      }
+    }).catch(e => console.warn("Public info fetch error:", e));
 
     // 6. Start DB latency poller
     this.startTelemetryPoller();
@@ -195,7 +192,7 @@ const App = {
 
     // Automatically initialize and start webcam on kiosk
     setTimeout(() => {
-      CameraController.startWebcam();
+      CameraController.startWebcam(true);
     }, 200);
 
     if (window.lucide) lucide.createIcons();
@@ -377,7 +374,7 @@ const App = {
     } else if (viewId === "students" || viewId === "student-registration" || viewId === "faculty-registration") {
       StudentsController.loadStudents();
     } else if (viewId === "camera") {
-      CameraController.startWebcam();
+      CameraController.startWebcam(true);
     } else if (viewId === "enrollment") {
       EnrollmentController.startWebcam();
       StudentsController.loadStudents();
