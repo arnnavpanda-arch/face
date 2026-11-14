@@ -92,6 +92,8 @@ class FaceDetector:
         try:
             cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
             self.face_cascade = cv2.CascadeClassifier(cascade_path)
+            alt_path = cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml"
+            self.face_cascade_alt = cv2.CascadeClassifier(alt_path)
             eye_path = cv2.data.haarcascades + "haarcascade_eye.xml"
             self.eye_cascade = cv2.CascadeClassifier(eye_path)
         except Exception as e:
@@ -162,22 +164,52 @@ class FaceDetector:
                 print(f"MTCNN detection error: {e}")
 
         # -------------------------------------------------------------
-        # STAGE 2: Multi-Scale Haar Cascade Detection (with Feature Verification)
+        # STAGE 2: Multi-Scale Haar Cascade Detection (with Multi-Pass Robustness)
         # -------------------------------------------------------------
         if self.face_cascade is not None:
             gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
-            gray_eq = cv2.equalizeHist(gray)
-            haar_detections = self.face_cascade.detectMultiScale(
-                gray_eq,
-                scaleFactor=1.10,
-                minNeighbors=5,   # minNeighbors=5 strictly filters out random background noise
-                minSize=(50, 50),
+
+            # Pass 1: Frontal Face Default on natural grayscale
+            haar_detections = list(self.face_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.08,
+                minNeighbors=4,
+                minSize=(32, 32),
                 flags=cv2.CASCADE_SCALE_IMAGE
-            )
+            ))
+
+            # Pass 2: Frontal Face Alt2 (significantly more robust to tilt, non-uniform indoor lighting)
+            if len(haar_detections) == 0 and hasattr(self, "face_cascade_alt") and self.face_cascade_alt is not None:
+                haar_detections = list(self.face_cascade_alt.detectMultiScale(
+                    gray,
+                    scaleFactor=1.08,
+                    minNeighbors=3,
+                    minSize=(32, 32),
+                    flags=cv2.CASCADE_SCALE_IMAGE
+                ))
+
+            # Pass 3: Histogram Equalization fallback if lighting was harsh/dark
+            if len(haar_detections) == 0:
+                gray_eq = cv2.equalizeHist(gray)
+                haar_detections = list(self.face_cascade.detectMultiScale(
+                    gray_eq,
+                    scaleFactor=1.10,
+                    minNeighbors=3,
+                    minSize=(32, 32),
+                    flags=cv2.CASCADE_SCALE_IMAGE
+                ))
+                if len(haar_detections) == 0 and hasattr(self, "face_cascade_alt") and self.face_cascade_alt is not None:
+                    haar_detections = list(self.face_cascade_alt.detectMultiScale(
+                        gray_eq,
+                        scaleFactor=1.10,
+                        minNeighbors=3,
+                        minSize=(32, 32),
+                        flags=cv2.CASCADE_SCALE_IMAGE
+                    ))
 
             for (x, y, fw, fh) in haar_detections:
                 aspect = fh / float(max(1, fw))
-                if not (0.80 <= aspect <= 1.55):
+                if not (0.65 <= aspect <= 1.70):
                     continue
 
                 pad_x = int(fw * 0.05)
