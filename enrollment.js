@@ -18,7 +18,7 @@ const EnrollmentController = {
     this.init();
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 480, height: 480, facingMode: "user" },
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
         audio: false
       });
       this.video.srcObject = this.stream;
@@ -42,12 +42,20 @@ const EnrollmentController = {
   },
 
   captureSnapshot() {
-    if (!this.video) return;
-    const ctx = this.canvas.getContext("2d");
+    if (!this.video || !this.canvas) return;
+    const vw = this.video.videoWidth || 640;
+    const vh = this.video.videoHeight || 480;
+
+    // Center-crop square to guarantee zero facial squishing / distortion
+    const size = Math.min(vw, vh);
+    const sx = Math.floor((vw - size) / 2);
+    const sy = Math.floor((vh - size) / 2);
+
     this.canvas.width = 480;
     this.canvas.height = 480;
-    ctx.drawImage(this.video, 0, 0, 480, 480);
-    this.capturedImageB64 = this.canvas.toDataURL("image/jpeg", 0.90);
+    const ctx = this.canvas.getContext("2d");
+    ctx.drawImage(this.video, sx, sy, size, size, 0, 0, 480, 480);
+    this.capturedImageB64 = this.canvas.toDataURL("image/jpeg", 0.92);
 
     const preview = document.getElementById("enroll-preview-img");
     preview.src = this.capturedImageB64;
@@ -76,16 +84,33 @@ const EnrollmentController = {
 
     const reader = new FileReader();
     reader.onload = (e) => {
-      this.capturedImageB64 = e.target.result;
-      const preview = document.getElementById("enroll-preview-img");
-      preview.src = this.capturedImageB64;
-      preview.classList.remove("d-none");
-      if (this.video) this.video.classList.add("d-none");
+      const img = new Image();
+      img.onload = () => {
+        const iw = img.width;
+        const ih = img.height;
+        let dw = iw, dh = ih;
+        if (Math.max(iw, ih) > 800) {
+          const ratio = 800 / Math.max(iw, ih);
+          dw = Math.round(iw * ratio);
+          dh = Math.round(ih * ratio);
+        }
+        this.canvas.width = dw;
+        this.canvas.height = dh;
+        const ctx = this.canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, dw, dh);
+        this.capturedImageB64 = this.canvas.toDataURL("image/jpeg", 0.92);
 
-      document.getElementById("btn-enroll-retake").classList.remove("d-none");
-      document.getElementById("btn-enroll-snap").classList.add("d-none");
+        const preview = document.getElementById("enroll-preview-img");
+        preview.src = this.capturedImageB64;
+        preview.classList.remove("d-none");
+        if (this.video) this.video.classList.add("d-none");
 
-      this.validateQuality();
+        document.getElementById("btn-enroll-retake").classList.remove("d-none");
+        document.getElementById("btn-enroll-snap").classList.add("d-none");
+
+        this.validateQuality();
+      };
+      img.src = e.target.result;
     };
     reader.readAsDataURL(file);
   },

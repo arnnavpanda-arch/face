@@ -32,8 +32,8 @@ const UnknownsController = {
             <div class="small text-muted font-monospace">${u.formatted_time}</div>
           </td>
           <td>
-            <div class="rounded border border-secondary" style="width: 50px; height: 50px; overflow: hidden; background: #000;">
-              ${u.snapshot_url ? `<img src="${u.snapshot_url}" style="width: 100%; height: 100%; object-fit: cover;" alt="Unknown Face"/>` : '<i data-lucide="help-circle" class="p-2"></i>'}
+            <div class="rounded border border-secondary d-flex align-items-center justify-content-center text-muted" style="width: 50px; height: 50px; overflow: hidden; background: #1e293b;">
+              ${u.snapshot_url ? `<img src="${u.snapshot_url}" style="width: 100%; height: 100%; object-fit: cover;" alt="Unknown Face"/>` : '<i data-lucide="user-x" style="width: 22px;"></i>'}
             </div>
           </td>
           <td>${u.camera_name || u.camera_id}</td>
@@ -74,7 +74,15 @@ const UnknownsController = {
     if (!u) return;
 
     const img = document.getElementById("verify-unknown-preview");
-    if (img && u.snapshot_url) img.src = u.snapshot_url;
+    if (img) {
+      if (u.snapshot_url) {
+        img.src = u.snapshot_url;
+        img.classList.remove("d-none");
+      } else {
+        img.src = "";
+        img.classList.add("d-none");
+      }
+    }
 
     document.getElementById("verify-notes-input").value = "";
     new bootstrap.Modal(document.getElementById("modal-verify-unknown")).show();

@@ -177,12 +177,28 @@ const StudentsController = {
   },
 
   async deleteStudent(studentId, studentName) {
-    if (!confirm(`Are you sure you want to permanently delete student ${studentName}?`)) return;
+    if (!confirm(`Are you sure you want to permanently delete ${studentName} from the database?`)) return;
     try {
       await API.deleteStudent(studentId);
       this.loadStudents();
     } catch (err) {
       alert(`Delete failed: ${err.message}`);
+    }
+  },
+
+  async deleteAllStudents() {
+    if (!confirm("Are you sure you want to permanently DELETE ALL student and faculty records from the database? This cannot be undone.")) return;
+    const confirmText = prompt('Please type "DELETE ALL" to permanently clear the directory database:');
+    if (confirmText !== "DELETE ALL") {
+      alert("Action cancelled. No records were deleted.");
+      return;
+    }
+    try {
+      const resp = await API.deleteAllStudents();
+      alert(resp.message || "All directory records have been deleted.");
+      this.loadStudents();
+    } catch (err) {
+      alert(`Delete all failed: ${err.message}`);
     }
   },
 

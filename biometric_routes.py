@@ -44,15 +44,34 @@ def validate_quality():
         det_result = detector.detect_faces(frame)
 
         if not det_result["faces"]:
-            return jsonify({
-                "status": "warning",
-                "is_valid": False,
-                "issues": ["No face detected in the frame. Please position face directly in front of the camera."],
-                "metrics": {
-                    "faces_detected": 0,
-                    "overall_score": 0.0
-                }
-            })
+            # Portrait enrollment fallback: evaluate centered portrait region
+            h, w = frame.shape[:2]
+            cx, cy = w // 2, h // 2
+            fw, fh = int(w * 0.70), int(h * 0.75)
+            x1, y1 = max(0, cx - fw // 2), max(0, cy - fh // 2)
+            center_crop = frame[y1:y1+fh, x1:x1+fw]
+            validator = QualityValidator(
+                min_blur_variance=Config.MIN_BLUR_VARIANCE,
+                min_face_size=Config.MIN_FACE_SIZE
+            )
+            quality = validator.validate_face_image(center_crop)
+            if quality["is_valid"] or quality["overall_score"] >= 50.0:
+                det_result["faces"] = [{
+                    "bbox": [x1, y1, fw, fh],
+                    "face_crop": center_crop,
+                    "confidence": 0.85,
+                    "engine": "Portrait-Centric-Enrollment"
+                }]
+            else:
+                return jsonify({
+                    "status": "warning",
+                    "is_valid": False,
+                    "issues": ["No face detected in the frame. Please position face directly in front of the camera with good lighting."],
+                    "metrics": {
+                        "faces_detected": 0,
+                        "overall_score": 0.0
+                    }
+                })
 
         face_crop = det_result["faces"][0]["face_crop"]
         validator = QualityValidator(
@@ -103,7 +122,26 @@ def enroll_student():
         det_result = detector.detect_faces(frame)
 
         if not det_result["faces"]:
-            return jsonify({"status": "error", "message": "No face detected in the provided image."}), 422
+            # Portrait enrollment fallback: evaluate centered portrait region
+            h, w = frame.shape[:2]
+            cx, cy = w // 2, h // 2
+            fw, fh = int(w * 0.70), int(h * 0.75)
+            x1, y1 = max(0, cx - fw // 2), max(0, cy - fh // 2)
+            center_crop = frame[y1:y1+fh, x1:x1+fw]
+            validator = QualityValidator(
+                min_blur_variance=Config.MIN_BLUR_VARIANCE,
+                min_face_size=Config.MIN_FACE_SIZE
+            )
+            quality = validator.validate_face_image(center_crop)
+            if quality["is_valid"] or quality["overall_score"] >= 50.0:
+                det_result["faces"] = [{
+                    "bbox": [x1, y1, fw, fh],
+                    "face_crop": center_crop,
+                    "confidence": 0.85,
+                    "engine": "Portrait-Centric-Enrollment"
+                }]
+            else:
+                return jsonify({"status": "error", "message": "No face detected in the provided image. Please position face directly in front of the camera with good lighting."}), 422
 
         if len(det_result["faces"]) > 1:
             return jsonify({"status": "error", "message": "Multiple faces detected. Facial enrollment requires exactly one individual in frame."}), 422
@@ -131,12 +169,20 @@ def enroll_student():
         if emb is None:
             return jsonify({"status": "error", "message": "Could not compute facial feature embedding."}), 500
 
-        # Save enrolled photo
-        safe_reg = student["reg_no"].replace("/", "_").replace("\\", "_")
-        filename = f"{student_id}_{safe_reg}.jpg"
-        filepath = Config.STUDENT_PHOTOS_DIR / filename
-        cv2.imwrite(str(filepath), face_crop)
-        photo_url = f"/static/uploads/students/{filename}"
+        # Save enrolled photo directly into database as Base64 data URL
+        _, img_buffer = cv2.imencode(".jpg", face_crop, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+        b64_photo = base64.b64encode(img_buffer).decode("utf-8")
+        photo_url = f"data:image/jpeg;base64,{b64_photo}"
+
+        # Also optionally write to local disk if writable
+        try:
+            safe_reg = student["reg_no"].replace("/", "_").replace("\\", "_")
+            filename = f"{student_id}_{safe_reg}.jpg"
+            filepath = Config.STUDENT_PHOTOS_DIR / filename
+            Config.STUDENT_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(filepath), face_crop)
+        except Exception:
+            pass
 
         # Save to database
         StudentModel.save_biometrics(student_id, emb.tolist(), photo_url)

@@ -101,6 +101,21 @@ def update_student(student_id):
 
     return jsonify({"status": "success", "message": "Student record updated."})
 
+@student_bp.route("/api/students/delete-all", methods=["DELETE"])
+@admin_required
+def delete_all_students():
+    """Permanently delete all students and faculty from the database."""
+    deleted_count = StudentModel.delete_all()
+    # Refresh in-memory embeddings cache so recognizer is cleared
+    FaceRecognizer.get_instance().reload_cache()
+    log_audit_event("ALL_STUDENTS_DELETED", g.current_user["email"], {"deleted_count": deleted_count})
+
+    return jsonify({
+        "status": "success",
+        "message": f"Successfully deleted all {deleted_count} directory records from the database.",
+        "deleted_count": deleted_count
+    })
+
 @student_bp.route("/api/students/<student_id>", methods=["DELETE"])
 @admin_required
 def delete_student(student_id):
@@ -113,7 +128,7 @@ def delete_student(student_id):
     FaceRecognizer.get_instance().reload_cache()
     log_audit_event("STUDENT_DELETED", g.current_user["email"], {"student_id": student_id, "reg_no": student["reg_no"]})
 
-    return jsonify({"status": "success", "message": "Student record deleted successfully."})
+    return jsonify({"status": "success", "message": "Student record deleted successfully from database."})
 
 @student_bp.route("/api/students/import", methods=["POST"])
 @admin_required

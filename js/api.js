@@ -104,6 +104,12 @@ const API = {
     });
   },
 
+  deleteAllStudents() {
+    return this.request("/api/students/delete-all", {
+      method: "DELETE"
+    });
+  },
+
   seedSyntheticStudents() {
     return this.request("/api/students/seed-synthetic", {
       method: "POST"

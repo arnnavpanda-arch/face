@@ -128,15 +128,13 @@ def process_frame():
             log_reason = ""
 
             if status == "Identified" and student:
-                # Save snapshot if entry is recorded
-                snapshot_filename = f"snap_{student['student_id']}_{int(time.time()*1000)}.jpg"
-                snapshot_path = Config.SNAPSHOTS_DIR / snapshot_filename
+                # Save entry snapshot directly into MongoDB Atlas as compact Base64
                 try:
-                    Config.SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-                    cv2.imwrite(str(snapshot_path), face_crop)
+                    _, snap_buf = cv2.imencode(".jpg", face_crop, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+                    b64_snap = base64.b64encode(snap_buf).decode("utf-8")
+                    snapshot_url = f"data:image/jpeg;base64,{b64_snap}"
                 except Exception:
-                    pass
-                snapshot_url = f"/static/uploads/snapshots/{snapshot_filename}"
+                    snapshot_url = ""
 
                 # Step 4: Record entry with cooldown anti-duplication
                 logged, log_id, reason = EntryLogModel.record_entry({
@@ -156,15 +154,8 @@ def process_frame():
                 log_reason = reason
 
             else:
-                # Unknown Person handling (Section 4.G: record unmatched events, non-punitive)
-                snapshot_filename = f"unknown_{camera_id}_{int(time.time()*1000)}.jpg"
-                snapshot_path = Config.UNKNOWN_PHOTOS_DIR / snapshot_filename
-                try:
-                    Config.UNKNOWN_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
-                    cv2.imwrite(str(snapshot_path), face_crop)
-                except Exception:
-                    pass
-                snapshot_url = f"/static/uploads/unknowns/{snapshot_filename}"
+                # Unknown Person handling: do NOT save any image for unknown persons for the time being
+                snapshot_url = ""
 
                 # Only log unknown once every 10s per camera to prevent flooding
                 cutoff = time.time() - 10
@@ -177,9 +168,9 @@ def process_frame():
                     UnknownLogModel.record_unknown({
                         "camera_id": camera_id,
                         "camera_name": camera_name,
-                        "snapshot_url": snapshot_url,
+                        "snapshot_url": "",
                         "best_similarity": similarity_score,
-                        "notes": "Unmatched facial detection at campus entrance point."
+                        "notes": "Unmatched facial detection at campus entrance point (image saving disabled)."
                     })
                     event_logged = True
                     log_reason = "Unknown person detection recorded for review."
