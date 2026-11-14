@@ -80,7 +80,7 @@
                 <button id="kiosk-btn-sim" class="btn btn-sm btn-outline-info" onclick="CameraController.startSimulatedFeed()" title="View Live Simulated Gate Feed">
                   <i data-lucide="play-circle" style="width: 14px;"></i> Live Stream
                 </button>
-                <button id="kiosk-btn-start" class="btn btn-sm btn-success" onclick="CameraController.startWebcam()" title="Start Physical Webcam">
+                <button id="kiosk-btn-start" class="btn btn-sm btn-success" onclick="CameraController.startWebcam(true)" title="Start Physical Webcam">
                   <i data-lucide="camera" style="width: 14px;"></i> Webcam
                 </button>
                 <button id="kiosk-btn-stop" class="btn btn-sm btn-danger d-none" onclick="CameraController.stopWebcam()">
@@ -763,7 +763,7 @@
               <button class="btn btn-sm btn-outline-info" onclick="CameraController.startSimulatedFeed()" title="View Live Campus Gate Stream">
                 <i data-lucide="play-circle" style="width: 14px;" class="me-1"></i> Live Stream
               </button>
-              <button id="btn-start-camera" class="btn btn-sm btn-success" onclick="CameraController.startWebcam()">
+              <button id="btn-start-camera" class="btn btn-sm btn-success" onclick="CameraController.startWebcam(true)">
                 <i data-lucide="video" style="width: 14px;" class="me-1"></i> Start Camera
               </button>
               <button id="btn-stop-camera" class="btn btn-sm btn-danger d-none" onclick="CameraController.stopWebcam()">

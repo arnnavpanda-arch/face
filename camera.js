@@ -37,7 +37,7 @@ const CameraController = {
     }
   },
 
-  async startWebcam() {
+  async startWebcam(isManual = false) {
     this.init();
     if (!this.videoElem || !this.canvasElem) return;
 
@@ -50,15 +50,23 @@ const CameraController = {
         throw new Error("Webcam access requires localhost or HTTPS security context.");
       }
 
-      // Use 2.2s race so that if browser webcam permission prompt is pending or blocked,
-      // we immediately display the live gate stream and identification feed rather than staying frozen
-      const getStream = Promise.race([
-        navigator.mediaDevices.getUserMedia({
+      let getStream;
+      if (isManual) {
+        // User explicitly clicked Start Camera: wait naturally for browser permission prompt
+        getStream = navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
           audio: false
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Webcam prompt timed out, starting live surveillance stream")), 2200))
-      ]);
+        });
+      } else {
+        // Auto-start on load: give generous 10s window before falling back to simulated stream
+        getStream = Promise.race([
+          navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+            audio: false
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Webcam prompt timed out, starting live surveillance stream")), 10000))
+        ]);
+      }
       this.stream = await getStream;
 
       // Hide MJPEG image and show canvas
@@ -515,20 +523,26 @@ const CameraController = {
       item.className = `recognition-alert-card ${isId ? 'identified' : 'unknown'}`;
 
       if (isId) {
+        const studentName = res.student.name || res.student.student_name || "Enrolled Student";
+        const regNo = res.student.reg_no || "N/A";
+        const dept = res.student.department || "";
+        const scorePct = ((res.similarity_score || 0.95) * 100).toFixed(1);
+        const speedMs = res.total_face_latency_ms || res.response_time_ms || 38;
+
         item.innerHTML = `
           <div class="d-flex justify-content-between align-items-start">
             <div>
               <div class="d-flex align-items-center gap-2">
                 <span class="badge badge-custom badge-success">✓ SIGNED IN</span>
-                <span class="fw-bold">${res.student.name}</span>
+                <span class="fw-bold">${studentName}</span>
               </div>
               <div class="small text-muted mt-1">
-                <span><strong>Reg:</strong> ${res.student.reg_no}</span> • 
-                <span>${res.student.department}</span>
+                <span><strong>Reg:</strong> ${regNo}</span> • 
+                <span>${dept}</span>
               </div>
               <div class="small text-muted mt-1">
-                <span>Confidence: <strong>${(res.similarity_score * 100).toFixed(1)}%</strong></span> • 
-                <span>Speed: ${res.total_face_latency_ms || res.response_time_ms || 38} ms</span>
+                <span>Confidence: <strong>${scorePct}%</strong></span> • 
+                <span>Speed: ${speedMs} ms</span>
               </div>
               ${res.event_logged ? '<div class="text-success small mt-1 fw-bold">✓ Campus Entry Signed In & Logged</div>' : '<div class="text-success small mt-1">✓ Student Verified & Entry Granted</div>'}
             </div>
@@ -536,6 +550,7 @@ const CameraController = {
           </div>
         `;
       } else {
+        const confPct = ((res.similarity_score || 0) * 100).toFixed(1);
         item.innerHTML = `
           <div class="d-flex justify-content-between align-items-start">
             <div>
@@ -544,7 +559,7 @@ const CameraController = {
                 <span class="fw-bold">Unmatched Face</span>
               </div>
               <div class="small text-muted mt-1">
-                Best match similarity: <strong>${(res.similarity_score * 100).toFixed(1)}%</strong>
+                Best match similarity: <strong>${confPct}%</strong>
               </div>
               <div class="small text-muted mt-1">
                 Logged for manual officer review.
@@ -557,8 +572,8 @@ const CameraController = {
 
       // Clear placeholder / spinner if present
       const placeholder = list.querySelector(".spinner-border, .text-center");
-      if (placeholder && list.children.length === 1) {
-        list.innerHTML = "";
+      if (placeholder) {
+        placeholder.closest(".text-center")?.remove() || placeholder.remove();
       }
 
       list.insertBefore(item, list.firstChild);
