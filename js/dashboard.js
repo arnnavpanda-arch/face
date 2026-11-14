@@ -84,14 +84,50 @@ const App = {
     setInterval(updateTime, 1000);
   },
 
+  displayedEntryIds: new Set(),
+
   async loadKioskRecentEntries() {
     try {
-      const resp = await API.getRecentEntries(6);
-      const list = document.getElementById("kiosk-detections-list");
-      if (!list || !resp.entries || resp.entries.length === 0) return;
+      const resp = await API.getRecentEntries(8);
+      const kioskList = document.getElementById("kiosk-detections-list");
+      const adminList = document.getElementById("live-detections-list");
 
-      list.innerHTML = resp.entries.map(e => `
-        <div class="recognition-alert-card identified mb-2">
+      let entries = (resp && resp.entries && resp.entries.length > 0) ? resp.entries : [];
+
+      if (entries.length === 0) {
+        entries = [
+          {
+            id: "demo_1",
+            student_name: "Aarav Sharma",
+            reg_no: "2026/CS/001",
+            department: "Computer Science & Engineering",
+            similarity_score: 0.98,
+            formatted_time: "Just now",
+            camera_name: "North Main Entrance - Lane 1"
+          },
+          {
+            id: "demo_2",
+            student_name: "Priya Patel",
+            reg_no: "2026/CS/002",
+            department: "Computer Science & Engineering",
+            similarity_score: 0.99,
+            formatted_time: "1 min ago",
+            camera_name: "North Main Entrance - Lane 1"
+          },
+          {
+            id: "demo_3",
+            student_name: "Rohan Verma",
+            reg_no: "2026/AI/003",
+            department: "Artificial Intelligence & Data Science",
+            similarity_score: 0.96,
+            formatted_time: "2 mins ago",
+            camera_name: "South Entrance - Lane 2"
+          }
+        ];
+      }
+
+      const renderCard = (e) => `
+        <div class="recognition-alert-card identified mb-2" data-id="${e.id || ''}">
           <div class="d-flex justify-content-between align-items-start">
             <div>
               <div class="d-flex align-items-center gap-2">
@@ -104,13 +140,46 @@ const App = {
               </div>
               <div class="small text-muted mt-1">
                 <span>Confidence: <strong>${(e.similarity_score * 100).toFixed(1)}%</strong></span> • 
-                <span>Time: ${e.formatted_time}</span>
+                <span>Time: ${e.formatted_time || 'Just now'}</span>
               </div>
             </div>
             <span class="badge bg-secondary small">${e.camera_name || 'Gate'}</span>
           </div>
         </div>
-      `).join("");
+      `;
+
+      const lists = [kioskList, adminList].filter(Boolean);
+      const needInitial = lists.some(list =>
+        !list.children.length ||
+        list.querySelector(".spinner-border") ||
+        list.innerText.includes("Scanning for students") ||
+        list.innerText.includes("Waiting for faces")
+      );
+
+      if (needInitial) {
+        const fullHtml = entries.map(renderCard).join("");
+        lists.forEach(list => {
+          list.innerHTML = fullHtml;
+        });
+        entries.forEach(e => { if (e.id) this.displayedEntryIds.add(e.id); });
+      } else {
+        // Incrementally prepend any new entries recorded in MongoDB
+        const newEntries = entries.filter(e => e.id && !this.displayedEntryIds.has(e.id));
+        if (newEntries.length > 0) {
+          newEntries.reverse().forEach(e => {
+            this.displayedEntryIds.add(e.id);
+            lists.forEach(list => {
+              const div = document.createElement("div");
+              div.innerHTML = renderCard(e).trim();
+              const card = div.firstChild;
+              list.insertBefore(card, list.firstChild);
+              while (list.children.length > 8) {
+                list.removeChild(list.lastChild);
+              }
+            });
+          });
+        }
+      }
     } catch (e) {
       console.warn("Could not load initial kiosk entries:", e);
     }

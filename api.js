@@ -159,6 +159,10 @@ const API = {
     return this.request("/api/camera/sources");
   },
 
+  getStreamStatus() {
+    return this.request("/api/camera/stream-status");
+  },
+
   // Entries
   getEntries(params = {}) {
     const qs = new URLSearchParams(params).toString();

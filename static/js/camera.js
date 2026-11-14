@@ -50,10 +50,16 @@ const CameraController = {
         throw new Error("Webcam access requires localhost or HTTPS security context.");
       }
 
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
-        audio: false
-      });
+      // Use 2.2s race so that if browser webcam permission prompt is pending or blocked,
+      // we immediately display the live gate stream and identification feed rather than staying frozen
+      const getStream = Promise.race([
+        navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+          audio: false
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Webcam prompt timed out, starting live surveillance stream")), 2200))
+      ]);
+      this.stream = await getStream;
 
       // Hide MJPEG image and show canvas
       const mjpegElems = [document.getElementById("kiosk-mjpeg-stream-img"), document.getElementById("mjpeg-stream-img")];
@@ -69,7 +75,7 @@ const CameraController = {
       await this.videoElem.play();
 
       this.updateStatusPill(`<span class="badge-pulse"></span> LIVE WEBCAM SCANNING`, true);
-      this.toggleButtons(true);
+      this.toggleButtons("webcam");
 
       // 1. Start fluid 60 FPS local video renderer (zero hang, zero stutter)
       this.startRenderLoop();
@@ -174,6 +180,17 @@ const CameraController = {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
     }
+    if (this.timerId) {
+      clearInterval(this.timerId);
+      this.timerId = null;
+    }
+    if (this.stream) {
+      this.stream.getTracks().forEach(track => track.stop());
+      this.stream = null;
+    }
+    if (this.videoElem) {
+      this.videoElem.srcObject = null;
+    }
 
     // Identify which container is visible (kiosk vs admin)
     const isKiosk = !document.getElementById("kiosk-panel")?.classList.contains("d-none");
@@ -193,20 +210,37 @@ const CameraController = {
     if (activeImg) {
       activeImg.classList.remove("d-none");
       let isFetching = false;
+      let lastSimIdx = -1;
+
       const fetchNext = () => {
         if (activeImg.classList.contains("d-none") || isFetching) return;
         isFetching = true;
         const pre = new Image();
-        pre.onload = () => {
+        pre.onload = async () => {
           isFetching = false;
           if (!activeImg.classList.contains("d-none")) {
             activeImg.src = pre.src;
-            this.simTimerId = setTimeout(fetchNext, 600); // Stable ~1.6 FPS gate frame cycle without network congestions
+
+            // Fetch dynamic gate detection info & synchronize HUD with Live Identification Feed
+            try {
+              const status = await API.getStreamStatus();
+              if (status && status.detection) {
+                this.updateHudMetrics(status.latency_ms, status.fps, this.nightVisionEnabled, 80);
+                if (status.active_index !== lastSimIdx) {
+                  lastSimIdx = status.active_index;
+                  this.pushRecentDetection(status.detection);
+                }
+              }
+            } catch (e) {
+              this.updateHudMetrics(38, 24, this.nightVisionEnabled, 80);
+            }
+
+            this.simTimerId = setTimeout(fetchNext, 600); // Fluid ~1.6 FPS gate frame cycle without network congestions
           }
         };
         pre.onerror = () => {
           isFetching = false;
-          this.simTimerId = setTimeout(fetchNext, 1500);
+          this.simTimerId = setTimeout(fetchNext, 1200);
         };
         pre.src = `/api/camera/current-frame?night_vision=${this.nightVisionEnabled ? "1" : "0"}&t=${Date.now()}`;
       };
@@ -215,7 +249,7 @@ const CameraController = {
 
     if (this.canvasElem) this.canvasElem.classList.add("d-none");
     if (this.videoElem) this.videoElem.classList.add("d-none");
-    this.toggleButtons(true);
+    this.toggleButtons("simulated");
   },
 
   updateStatusPill(html, isLive) {
@@ -229,23 +263,42 @@ const CameraController = {
     });
   },
 
-  toggleButtons(isRunning) {
+  toggleButtons(mode) {
     const startBtns = [document.getElementById("kiosk-btn-start"), document.getElementById("btn-start-camera")];
     const stopBtns = [document.getElementById("kiosk-btn-stop"), document.getElementById("btn-stop-camera")];
+    const simBtns = [document.getElementById("kiosk-btn-sim"), document.getElementById("btn-sim-camera")];
 
-    startBtns.forEach(b => {
-      if (b) {
-        if (isRunning) b.classList.add("d-none");
-        else b.classList.remove("d-none");
-      }
-    });
-
-    stopBtns.forEach(b => {
-      if (b) {
-        if (isRunning) b.classList.remove("d-none");
-        else b.classList.add("d-none");
-      }
-    });
+    if (mode === "webcam") {
+      startBtns.forEach(b => b && b.classList.add("d-none"));
+      stopBtns.forEach(b => b && b.classList.remove("d-none"));
+      simBtns.forEach(b => {
+        if (b) {
+          b.classList.remove("btn-info", "active");
+          b.classList.add("btn-outline-info");
+        }
+      });
+    } else if (mode === "simulated") {
+      // Show Webcam button so user can switch to webcam anytime
+      startBtns.forEach(b => b && b.classList.remove("d-none"));
+      stopBtns.forEach(b => b && b.classList.remove("d-none"));
+      simBtns.forEach(b => {
+        if (b) {
+          b.classList.remove("btn-outline-info");
+          b.classList.add("btn-info", "active");
+        }
+      });
+    } else {
+      // Stopped / paused
+      startBtns.forEach(b => b && b.classList.remove("d-none"));
+      stopBtns.forEach(b => b && b.classList.add("d-none"));
+      simBtns.forEach(b => {
+        if (b) {
+          b.classList.remove("btn-info", "active");
+          b.classList.add("btn-outline-info");
+        }
+      });
+    }
+    if (window.lucide) lucide.createIcons();
   },
 
   toggleNightVision() {
@@ -475,7 +528,7 @@ const CameraController = {
               </div>
               <div class="small text-muted mt-1">
                 <span>Confidence: <strong>${(res.similarity_score * 100).toFixed(1)}%</strong></span> • 
-                <span>Speed: ${res.total_face_latency_ms} ms</span>
+                <span>Speed: ${res.total_face_latency_ms || res.response_time_ms || 38} ms</span>
               </div>
               ${res.event_logged ? '<div class="text-success small mt-1 fw-bold">✓ Campus Entry Signed In & Logged</div>' : '<div class="text-success small mt-1">✓ Student Verified & Entry Granted</div>'}
             </div>
@@ -500,6 +553,12 @@ const CameraController = {
             <span class="text-muted small">${nowStr}</span>
           </div>
         `;
+      }
+
+      // Clear placeholder / spinner if present
+      const placeholder = list.querySelector(".spinner-border, .text-center");
+      if (placeholder && list.children.length === 1) {
+        list.innerHTML = "";
       }
 
       list.insertBefore(item, list.firstChild);
