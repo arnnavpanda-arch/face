@@ -77,9 +77,6 @@
                 <button id="kiosk-btn-night" class="btn btn-sm btn-outline-warning" onclick="CameraController.toggleNightVision()" title="Toggle Low-Light Night Vision Mode">
                   <i data-lucide="moon" style="width: 14px;"></i> Night Vision
                 </button>
-                <button id="kiosk-btn-sim" class="btn btn-sm btn-outline-info" onclick="CameraController.startSimulatedFeed()" title="View Live Simulated Gate Feed">
-                  <i data-lucide="play-circle" style="width: 14px;"></i> Live Stream
-                </button>
                 <button id="kiosk-btn-start" class="btn btn-sm btn-success" onclick="CameraController.startWebcam(true)" title="Start Physical Webcam">
                   <i data-lucide="camera" style="width: 14px;"></i> Webcam
                 </button>
@@ -90,7 +87,7 @@
             </div>
 
             <!-- Video Monitor Box with HUD Overlay -->
-            <div class="video-monitor-box">
+            <div class="video-monitor-box position-relative">
               <div class="video-hud-overlay">
                 <div id="kiosk-status-pill" class="hud-pill live">
                   <span class="badge-pulse"></span> LIVE WEBCAM SCANNING
@@ -108,8 +105,7 @@
 
               <!-- Main Canvas for Real-time Face Bounding Boxes -->
               <canvas id="kiosk-camera-canvas" width="640" height="480"></canvas>
-              <video id="kiosk-webcam-video" autoplay playsinline muted class="d-none"></video>
-              <img id="kiosk-mjpeg-stream-img" class="d-none w-100" alt="Camera Stream"/>
+              <video id="kiosk-webcam-video" autoplay playsinline muted style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; z-index: -1;"></video>
             </div>
           </div>
         </div>
@@ -760,9 +756,6 @@
               <button id="btn-night-camera" class="btn btn-sm btn-outline-warning" onclick="CameraController.toggleNightVision()" title="Toggle Low-Light Night Vision Mode">
                 <i data-lucide="moon" style="width: 14px;" class="me-1"></i> Night Vision
               </button>
-              <button class="btn btn-sm btn-outline-info" onclick="CameraController.startSimulatedFeed()" title="View Live Campus Gate Stream">
-                <i data-lucide="play-circle" style="width: 14px;" class="me-1"></i> Live Stream
-              </button>
               <button id="btn-start-camera" class="btn btn-sm btn-success" onclick="CameraController.startWebcam(true)">
                 <i data-lucide="video" style="width: 14px;" class="me-1"></i> Start Camera
               </button>
@@ -775,7 +768,7 @@
           <div class="row g-4">
             <div class="col-lg-8">
               <div class="card-custom p-3">
-                <div class="video-monitor-box">
+                <div class="video-monitor-box position-relative">
                   <div class="video-hud-overlay">
                     <div id="camera-status-pill" class="hud-pill live">
                       <span class="badge-pulse"></span> LIVE
@@ -792,8 +785,7 @@
                   </div>
 
                   <canvas id="camera-canvas" width="640" height="480"></canvas>
-                  <video id="webcam-video" autoplay playsinline muted class="d-none"></video>
-                  <img id="mjpeg-stream-img" class="d-none w-100" alt="Camera Stream"/>
+                  <video id="webcam-video" autoplay playsinline muted style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; z-index: -1;"></video>
                 </div>
               </div>
             </div>
