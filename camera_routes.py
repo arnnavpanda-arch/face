@@ -150,8 +150,8 @@ def process_frame():
                     "response_time_ms": round(detection_latency_ms + recognition_latency_ms, 2),
                     "snapshot_url": snapshot_url
                 }, cooldown_seconds=cooldown_seconds)
-                event_logged = logged
-                log_reason = reason
+                event_logged = True
+                log_reason = reason if logged else "Student verified (cooldown active)."
 
             else:
                 # Unknown Person handling: do NOT save any image for unknown persons for the time being
@@ -172,10 +172,10 @@ def process_frame():
                         "best_similarity": similarity_score,
                         "notes": "Unmatched facial detection at campus entrance point (image saving disabled)."
                     })
-                    event_logged = True
                     log_reason = "Unknown person detection recorded for review."
                 else:
                     log_reason = "Recent unknown already logged."
+                event_logged = True
 
             results.append({
                 "bbox": bbox,

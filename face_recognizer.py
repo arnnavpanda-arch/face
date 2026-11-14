@@ -235,12 +235,12 @@ class FaceRecognizer:
                         hog_sim = float(np.dot(q_hog, r_hog))
 
                         raw = 0.35 * ncc_g + 0.25 * ncc_u + 0.15 * ncc_l + 0.25 * hog_sim
-                        if raw >= 0.65:
-                            conf = min(0.99, 0.88 + (raw - 0.65) * 0.30)
-                        elif raw >= 0.54:
-                            conf = min(0.85, 0.70 + (raw - 0.54) * 1.5)
+                        if raw >= 0.50:
+                            conf = min(0.99, 0.88 + (raw - 0.50) * 0.22)
+                        elif raw >= 0.38:
+                            conf = min(0.85, 0.70 + (raw - 0.38) * 1.25)
                         else:
-                            conf = max(0.0, raw * 1.0)
+                            conf = max(0.0, raw * 0.65)
 
                         candidate_scores[sid] = max(candidate_scores.get(sid, 0.0), conf)
                     except Exception:

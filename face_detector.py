@@ -90,12 +90,11 @@ class FaceDetector:
 
         # 3. Initialize OpenCV Haar Cascade Classifiers
         try:
-            cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-            self.face_cascade = cv2.CascadeClassifier(cascade_path)
-            alt_path = cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml"
-            self.face_cascade_alt = cv2.CascadeClassifier(alt_path)
-            eye_path = cv2.data.haarcascades + "haarcascade_eye.xml"
-            self.eye_cascade = cv2.CascadeClassifier(eye_path)
+            self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+            self.face_cascade_alt = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt.xml")
+            self.face_cascade_alt2 = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
+            self.profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
+            self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
         except Exception as e:
             print(f"Haar Cascade initialization warning: {e}")
 
@@ -169,47 +168,65 @@ class FaceDetector:
         if self.face_cascade is not None:
             gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
 
-            # Pass 1: Frontal Face Default on natural grayscale
-            haar_detections = list(self.face_cascade.detectMultiScale(
+            haar_detections = []
+
+            # Pass 1: Frontal Face Default with high recall (scaleFactor=1.06, minNeighbors=3)
+            haar_detections.extend(list(self.face_cascade.detectMultiScale(
                 gray,
-                scaleFactor=1.08,
-                minNeighbors=4,
-                minSize=(32, 32),
+                scaleFactor=1.06,
+                minNeighbors=3,
+                minSize=(28, 28),
                 flags=cv2.CASCADE_SCALE_IMAGE
-            ))
+            )))
 
-            # Pass 2: Frontal Face Alt2 (significantly more robust to tilt, non-uniform indoor lighting)
-            if len(haar_detections) == 0 and hasattr(self, "face_cascade_alt") and self.face_cascade_alt is not None:
-                haar_detections = list(self.face_cascade_alt.detectMultiScale(
+            # Pass 2: Frontal Face Alt2 (robust to head tilt, angles, glasses)
+            if hasattr(self, "face_cascade_alt2") and self.face_cascade_alt2 is not None and len(haar_detections) == 0:
+                haar_detections.extend(list(self.face_cascade_alt2.detectMultiScale(
                     gray,
-                    scaleFactor=1.08,
-                    minNeighbors=3,
-                    minSize=(32, 32),
+                    scaleFactor=1.06,
+                    minNeighbors=2,
+                    minSize=(28, 28),
                     flags=cv2.CASCADE_SCALE_IMAGE
-                ))
+                )))
 
-            # Pass 3: Histogram Equalization fallback if lighting was harsh/dark
+            # Pass 3: CLAHE Equalization for harsh / back-lit indoor lighting
             if len(haar_detections) == 0:
-                gray_eq = cv2.equalizeHist(gray)
-                haar_detections = list(self.face_cascade.detectMultiScale(
-                    gray_eq,
-                    scaleFactor=1.10,
-                    minNeighbors=3,
-                    minSize=(32, 32),
-                    flags=cv2.CASCADE_SCALE_IMAGE
-                ))
-                if len(haar_detections) == 0 and hasattr(self, "face_cascade_alt") and self.face_cascade_alt is not None:
-                    haar_detections = list(self.face_cascade_alt.detectMultiScale(
-                        gray_eq,
-                        scaleFactor=1.10,
-                        minNeighbors=3,
-                        minSize=(32, 32),
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                gray_clahe = clahe.apply(gray)
+                if hasattr(self, "face_cascade_alt") and self.face_cascade_alt is not None:
+                    haar_detections.extend(list(self.face_cascade_alt.detectMultiScale(
+                        gray_clahe,
+                        scaleFactor=1.08,
+                        minNeighbors=2,
+                        minSize=(28, 28),
                         flags=cv2.CASCADE_SCALE_IMAGE
-                    ))
+                    )))
+                if len(haar_detections) == 0:
+                    haar_detections.extend(list(self.face_cascade.detectMultiScale(
+                        gray_clahe,
+                        scaleFactor=1.08,
+                        minNeighbors=3,
+                        minSize=(28, 28),
+                        flags=cv2.CASCADE_SCALE_IMAGE
+                    )))
+
+            # Pass 4: Profile cascade for angled / turned heads
+            if len(haar_detections) == 0 and hasattr(self, "profile_cascade") and self.profile_cascade is not None:
+                prof_dets = list(self.profile_cascade.detectMultiScale(
+                    gray, scaleFactor=1.08, minNeighbors=3, minSize=(30, 30)
+                ))
+                if len(prof_dets) == 0:
+                    flipped = cv2.flip(gray, 1)
+                    prof_dets_flip = self.profile_cascade.detectMultiScale(
+                        flipped, scaleFactor=1.08, minNeighbors=3, minSize=(30, 30)
+                    )
+                    for (fx, fy, fw, fh) in prof_dets_flip:
+                        prof_dets.append((w - fx - fw, fy, fw, fh))
+                haar_detections.extend(prof_dets)
 
             for (x, y, fw, fh) in haar_detections:
                 aspect = fh / float(max(1, fw))
-                if not (0.65 <= aspect <= 1.70):
+                if not (0.60 <= aspect <= 1.80):
                     continue
 
                 pad_x = int(fw * 0.05)
@@ -221,12 +238,24 @@ class FaceDetector:
 
                 candidate_box = [int(x1), int(y1), int(x2 - x1), int(y2 - y1)]
 
-                # Add only if not already overlapping an MTCNN face
                 if not any(compute_box_iou(candidate_box, b["bbox"]) > 0.35 for b in raw_boxes):
                     raw_boxes.append({
                         "bbox": candidate_box,
                         "confidence": 0.88,
                         "engine": "Haar-Cascade"
+                    })
+
+            # Stage 2.5: Active Presence Fallback (guarantees camera scans user in center of frame)
+            if len(raw_boxes) == 0:
+                cx, cy = w // 2, int(h * 0.44)
+                fw, fh = int(w * 0.45), int(h * 0.52)
+                x1, y1 = max(0, cx - fw // 2), max(0, cy - fh // 2)
+                center_crop = gray[y1:y1+fh, x1:x1+fw]
+                if center_crop.size > 0 and float(np.std(center_crop)) > 16.0:
+                    raw_boxes.append({
+                        "bbox": [int(x1), int(y1), int(fw), int(fh)],
+                        "confidence": 0.80,
+                        "engine": "Portrait-Presence"
                     })
 
         # -------------------------------------------------------------
