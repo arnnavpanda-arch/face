@@ -97,8 +97,19 @@ class StudentModel:
     @staticmethod
     def delete(student_id: str):
         col = get_students_collection()
-        res = col.delete_one({"_id": ObjectId(student_id)})
-        return res.deleted_count > 0
+        try:
+            res = col.delete_one({"_id": ObjectId(student_id)})
+            return res.deleted_count > 0
+        except Exception:
+            # Fallback if student_id is stored as string
+            res = col.delete_one({"_id": student_id})
+            return res.deleted_count > 0
+
+    @staticmethod
+    def delete_all():
+        col = get_students_collection()
+        res = col.delete_many({})
+        return res.deleted_count
 
     @staticmethod
     def delete_biometrics(student_id: str):
